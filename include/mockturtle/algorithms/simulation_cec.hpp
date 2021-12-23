@@ -55,6 +55,47 @@ struct simulation_cec_stats
 
 namespace detail
 {
+class tt_simulator
+{
+  public:
+    tt_simulator() = delete;
+    tt_simulator( uint32_t split_var, uint32_t round ) : _split_var( split_var ), _round( round ) {}
+
+    kitty::dynamic_truth_table compute_constant( bool value ) const
+    {
+      kitty::dynamic_truth_table tt( _split_var );
+      return value ? ~tt : tt;
+    }
+
+    kitty::dynamic_truth_table compute_pi( uint32_t index ) const
+    {
+      kitty::dynamic_truth_table tt( _split_var );
+      if( index < _split_var )
+      {
+        kitty::create_nth_var( tt, index );
+      }
+      else 
+      {
+	bool val = ((_round >> (index - _split_var)) & 1);
+        if( val == 0  )
+        {
+            tt = ~tt;
+        }
+      }
+      
+      return tt;
+    }
+
+    kitty::dynamic_truth_table compute_not( kitty::dynamic_truth_table const& value ) const
+    {
+      return ~value;
+    }
+
+  private:
+    uint32_t _split_var;
+    uint32_t _round;
+};
+
 
 template<class Ntk>
 class simulation_cec_impl
@@ -74,17 +115,53 @@ public:
   bool run()
   {
     /* TODO: write your implementation here */
-    return false;
+    uint32_t num_pis = _ntk.num_pis();
+    uint32_t num_nodes = _ntk.size();
+
+    _st.split_var = calculate_split_var(num_pis, num_nodes);
+    _st.rounds = 1 << (num_pis - _st.split_var);
+
+    for(uint32_t rounds = 0; rounds < _st.rounds; rounds++)
+    {
+      tt_simulator t_sim(_st.split_var, rounds);
+      const auto tt_po = simulate<kitty::dynamic_truth_table>(_ntk, t_sim);
+
+      for(auto& it : tt_po)
+      {
+        if(kitty::is_const0(it) == 0)
+        {
+          return false;
+        }
+      }
+    }
+    return true;
   }
 
 private:
   /* you can add additional methods here */
+  uint32_t calculate_split_var(uint32_t num_pis, uint32_t num_nodes)
+  {
+    if(num_pis <= 6u)
+    {
+      return num_pis;
+    }
+    else
+    {
+      uint32_t m = 7;
+      while(m <= num_pis &&  ( 32 +  ( 1 << (m - 3)) * num_nodes ) <= ( 1 << 29 ) )
+      {
+        m++;
+      }
+      return m-1;
+    }
+  }
 
 private:
   Ntk& _ntk;
   simulation_cec_stats& _st;
   /* you can add other attributes here */
 };
+
 
 } // namespace detail
 
